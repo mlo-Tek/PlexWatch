@@ -153,7 +153,7 @@ class QBittorrentCog(commands.Cog):
 
         # Nur wirklich aktive Downloads
         active = [t for t in torrents if t.get("state", "") in (
-            "downloading", "forcedDL", "metaDL", "checkingDL"
+            "downloading", "forcedDL"
         )]
 
         if not active:
