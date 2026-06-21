@@ -20,7 +20,6 @@ class PlexCore(commands.Cog):
         self.bot = bot
         self.logger = logging.getLogger("plexwatch_bot.plex")
 
-        # Load environment variables
         self.PLEX_URL = os.getenv("PLEX_URL")
         self.PLEX_TOKEN = os.getenv("PLEX_TOKEN")
         channel_id = os.getenv("CHANNEL_ID")
@@ -29,13 +28,11 @@ class PlexCore(commands.Cog):
             raise ValueError("CHANNEL_ID must be set in .env")
         self.CHANNEL_ID = int(channel_id)
 
-        # File paths
         self.current_dir = os.path.dirname(os.path.abspath(__file__))
         self.MESSAGE_ID_FILE = os.path.join(self.current_dir, "..", "data", "dashboard_message_id.json")
         self.USER_MAPPING_FILE = os.path.join(self.current_dir, "..", "data", "user_mapping.json")
         self.CONFIG_FILE = os.path.join(self.current_dir, "..", "data", "config.json")
 
-        # Initialize state
         self.config = self._load_config()
         self.plex: Optional[PlexServer] = None
         self.plex_start_time: Optional[float] = None
@@ -44,7 +41,6 @@ class PlexCore(commands.Cog):
         self.offline_since: Optional[datetime] = None
         self.stream_debug = False
 
-        # Cache settings
         self.library_cache: Dict[str, Dict[str, Any]] = {}
         self.last_library_update: Optional[datetime] = None
         self.library_update_interval = self.config.get("cache", {}).get("library_update_interval", 900)
@@ -54,7 +50,6 @@ class PlexCore(commands.Cog):
         self.update_dashboard.start()
 
     def _load_config(self) -> Dict[str, Any]:
-        """Load configuration from config.json with defaults if unavailable."""
         default_config = {
             "dashboard": {"name": "Plex Dashboard", "icon_url": "", "footer_icon_url": ""},
             "plex_sections": {"show_all": True, "sections": {}},
@@ -74,7 +69,6 @@ class PlexCore(commands.Cog):
             return default_config
 
     def _load_message_id(self) -> Optional[int]:
-        """Load the dashboard message ID from file."""
         if not os.path.exists(self.MESSAGE_ID_FILE):
             return None
         try:
@@ -86,7 +80,6 @@ class PlexCore(commands.Cog):
             return None
 
     def _save_message_id(self, message_id: int) -> None:
-        """Save the dashboard message ID to file."""
         try:
             with open(self.MESSAGE_ID_FILE, "w", encoding="utf-8") as f:
                 json.dump({"message_id": message_id}, f)
@@ -94,7 +87,6 @@ class PlexCore(commands.Cog):
             self.logger.error(f"Failed to save message ID: {e}")
 
     def _load_user_mapping(self) -> Dict[str, str]:
-        """Load user mapping from JSON file."""
         try:
             with open(self.USER_MAPPING_FILE, "r", encoding="utf-8") as f:
                 return json.load(f)
@@ -103,7 +95,6 @@ class PlexCore(commands.Cog):
             return {}
 
     def connect_to_plex(self) -> Optional[PlexServer]:
-        """Attempt to establish a connection to the Plex server."""
         try:
             plex = PlexServer(self.PLEX_URL, self.PLEX_TOKEN)
             if self.plex_start_time is None:
@@ -115,7 +106,6 @@ class PlexCore(commands.Cog):
             return None
 
     def get_server_info(self) -> Dict[str, Any]:
-        """Retrieve current Plex server status and statistics."""
         self.plex = self.connect_to_plex()
         if not self.plex:
             return self.get_offline_info()
@@ -133,7 +123,6 @@ class PlexCore(commands.Cog):
             return self.get_offline_info()
 
     def calculate_uptime(self) -> str:
-        """Calculate Plex server uptime as a formatted string."""
         if not self.plex_start_time:
             return "Offline"
         total_minutes = int((time.time() - self.plex_start_time) / 60)
@@ -142,7 +131,6 @@ class PlexCore(commands.Cog):
         return "99+ Hours" if hours > 99 else f"{hours:02d}:{minutes:02d}"
 
     def get_library_stats(self) -> Dict[str, Dict[str, Any]]:
-        """Fetch and cache Plex library statistics, preserving config order."""
         current_time = datetime.now()
         if (
             self.last_library_update
@@ -192,7 +180,6 @@ class PlexCore(commands.Cog):
             return self.library_cache
 
     def _build_section_stats(self, section, config: Dict[str, Any]) -> Dict[str, Any]:
-        """Build statistics dictionary for a Plex section."""
         return {
             "count": len(section.all()),
             "episodes": sum(show.leafCount for show in section.all()) if config["show_episodes"] and hasattr(section, "all") else 0,
@@ -202,57 +189,16 @@ class PlexCore(commands.Cog):
         }
 
     def get_active_streams(self) -> List[str]:
-        """Retrieve formatted information about active Plex streams."""
         if not self.plex:
             return []
         sessions = self.plex.sessions()
-        if self.stream_debug:
-            self.logger.debug(f"Found {len(sessions)} active sessions")
         return [
             stream_info
             for idx, session in enumerate(sessions, start=1)
             if (stream_info := self.format_stream_info(session, idx))
-            and (self.stream_debug and self.logger.debug(f"Formatted Stream Info:\n{stream_info}\n{'='*50}") or True)
         ]
 
-    def _debug_session_details(self, session, idx: int) -> None:
-        """Log detailed Plex session information for debugging."""
-        self.logger.debug(f"\n{'='*50}\nSession {idx} Raw Data:")
-        self.logger.debug(f"Type: {session.type}")
-        self.logger.debug(f"Title: {session.title}")
-        self.logger.debug(f"User: {session.usernames[0] if session.usernames else 'Unknown'}")
-        self.logger.debug(f"Player: {session.players[0].product if session.players else 'Unknown'}")
-
-        if hasattr(session, "media") and session.media:
-            media = session.media[0]
-            self.logger.debug("\nMedia Info:")
-            self.logger.debug(f"Resolution: {getattr(media, 'videoResolution', 'Unknown')}")
-            self.logger.debug(f"Bitrate: {getattr(media, 'bitrate', 'Unknown')}")
-            self.logger.debug(f"Duration: {session.duration if hasattr(session, 'duration') else 'Unknown'}")
-
-            if hasattr(media, "parts") and media.parts:
-                self.logger.debug("\nAudio Streams:")
-                for part in media.parts:
-                    if hasattr(part, "streams"):
-                        for stream in part.streams:
-                            if getattr(stream, "streamType", None) == 2:
-                                self.logger.debug(f"Language: {getattr(stream, 'language', 'Unknown')}")
-                                self.logger.debug(f"Language Code: {getattr(stream, 'languageCode', 'Unknown')}")
-                                self.logger.debug(f"Selected: {getattr(stream, 'selected', False)}")
-
-        if hasattr(session, "viewOffset"):
-            progress = (session.viewOffset / session.duration * 100) if session.duration else 0
-            self.logger.debug("\nProgress Info:")
-            self.logger.debug(f"View Offset: {session.viewOffset}")
-            self.logger.debug(f"Progress: {progress:.2f}%")
-
-        self.logger.debug("\nTranscode Info:")
-        self.logger.debug(f"Transcoding: {session.transcodeSession is not None}")
-        if session.transcodeSession:
-            self.logger.debug(f"Transcode Data: {vars(session.transcodeSession)}")
-
     def format_stream_info(self, session, idx: int) -> str:
-        """Format Plex stream details into a displayable string."""
         try:
             user = session.usernames[0] if session.usernames else "Unbekannt"
             displayed_user = self.user_mapping.get(user, user)
@@ -270,7 +216,8 @@ class PlexCore(commands.Cog):
                 else 0
             )
             is_paused = getattr(session.players[0], "state", "") == "paused" if hasattr(session, "players") and session.players else False
-            progress_display = "⏸️" if is_paused else f"[{'▓' * int(progress_percent / 10)}{'░' * (10 - int(progress_percent / 10))}] {progress_percent:.1f}%"
+            bar = f"{'▓' * int(progress_percent / 10)}{'░' * (10 - int(progress_percent / 10))}"
+            progress_display = f"⏸️ {bar} {progress_percent:.1f}%" if is_paused else f"{bar} {progress_percent:.1f}%"
 
             current_time = self._format_time(str(timedelta(milliseconds=session.viewOffset or 0)).split(".")[0], session.duration or 0)
             total_time = self._format_time(str(timedelta(milliseconds=session.duration or 0)).split(".")[0], session.duration or 0)
@@ -290,8 +237,8 @@ class PlexCore(commands.Cog):
             transcode_session = getattr(session, "transcodeSession", None)
             transcode_emoji = "🔄" if transcode_session else "⏯️"
             bitrate = (
-                f"{transcode_session.bitrate / 1000:.1f} Mbps" if transcode_session and getattr(transcode_session, "bitrate", None)
-                else f"{media.bitrate / 1000:.1f} Mbps" if media and getattr(media, "bitrate", None)
+                f"⚡ {transcode_session.bitrate / 1000:.1f} Mbps" if transcode_session and getattr(transcode_session, "bitrate", None)
+                else f"⚡ {media.bitrate / 1000:.1f} Mbps" if media and getattr(media, "bitrate", None)
                 else ""
             )
 
@@ -302,22 +249,20 @@ class PlexCore(commands.Cog):
             )
 
             return (
-                f"**```{content_emoji} {title} | {displayed_user}\n"
-                f"└─ {progress_display} | {current_time}/{total_time}\n"
-                f" └─ {transcode_emoji} {quality} {bitrate} | {product_name}```**"
+                f"**```{content_emoji} {title} · {displayed_user}\n"
+                f"└─ {progress_display} · {current_time}/{total_time}\n"
+                f" └─ {transcode_emoji} 🖥️ {product_name} · 📡 {quality} · {bitrate}```**"
             )
         except Exception as e:
             self.logger.error(f"Error formatting stream info: {e}")
             return f"```❓ Stream could not be loaded (# {idx})```"
 
     def _format_time(self, time_str: str, duration: int) -> str:
-        """Format time string based on content duration."""
         parts = time_str.split(":")
         less_than_hour = (duration // 1000) < 3600
         return f"{int(parts[-2]):02d}:{int(parts[-1]):02d}" if less_than_hour else f"{int(parts[0]):01d}:{int(parts[1]):02d}:{int(parts[2]):02d}"
 
     def _get_formatted_title(self, session) -> str:
-        """Format content title based on its type."""
         if hasattr(session, "type") and session.type == "track":
             artist = getattr(session, "grandparentTitle", "Unknown Artist")
             track = getattr(session, "title", "Unknown Track")
@@ -334,19 +279,17 @@ class PlexCore(commands.Cog):
         return f"{session.title}{year}"
 
     def get_offline_info(self) -> Dict[str, Any]:
-        """Generate server info when Plex is offline, respecting config order."""
         current_time = discord.utils.utcnow()
         if not self.offline_since:
             self.offline_since = current_time
         stats: Dict[str, Dict[str, Any]] = {}
         plex_config = self.config["plex_sections"]
         configured_sections = plex_config["sections"]
-
         for title in configured_sections:
             config = configured_sections[title]
             stats[title] = {
                 "count": 0,
-                "episodes": 0 if config["show_episodes"] else 0,
+                "episodes": 0,
                 "display_name": config["display_name"],
                 "emoji": config["emoji"],
                 "show_episodes": config["show_episodes"],
@@ -361,7 +304,6 @@ class PlexCore(commands.Cog):
 
     @tasks.loop(minutes=5)
     async def update_status(self) -> None:
-        """Update bot presence with Plex status and stream count."""
         try:
             info = self.get_server_info()
             active_streams = len(info["active_users"])
@@ -392,11 +334,9 @@ class PlexCore(commands.Cog):
 
     @tasks.loop(minutes=1)
     async def update_dashboard(self) -> None:
-        """Update Discord dashboard with Plex, SABnzbd, qBittorrent and Uptime data."""
         channel = self.bot.get_channel(self.CHANNEL_ID)
         if not channel:
             return
-
         try:
             info = self.get_server_info()
 
@@ -404,7 +344,6 @@ class PlexCore(commands.Cog):
             if sabnzbd_cog:
                 info["downloads"] = await sabnzbd_cog.get_sabnzbd_info()
 
-            # NEU: qBittorrent
             qb_cog = self.bot.get_cog("QBittorrentCog")
             if qb_cog:
                 info["qb_downloads"] = await qb_cog.get_downloads_field()
@@ -432,7 +371,6 @@ class PlexCore(commands.Cog):
             self.logger.error(f"Error updating dashboard: {e}")
 
     async def create_dashboard_embed(self, info: Dict[str, Any]) -> discord.Embed:
-        """Create a dashboard embed reflecting server status."""
         dashboard_config = self.config["dashboard"]
         embed = discord.Embed(
             title="Server is currently Offline! :warning:" if info["status"] != "🟢 Online" else "Server is currently Online! :white_check_mark:",
@@ -471,7 +409,6 @@ class PlexCore(commands.Cog):
         return embed
 
     async def _add_embed_fields(self, embed: discord.Embed, info: Dict[str, Any]) -> None:
-        """Add fields to the dashboard embed when server is online."""
         embed.add_field(name="Server Uptime 🖥️", value=f"```{info['uptime']}```", inline=True)
         embed.add_field(name="", value="", inline=True)
         embed.add_field(name="", value="", inline=True)
@@ -494,10 +431,10 @@ class PlexCore(commands.Cog):
                         inline=True,
                     )
 
+        # Streams
         if info["active_users"]:
             stream_count = len(info["active_users"])
-            streams_limited = info["active_users"][:8]
-            streams_text = " ".join(streams_limited)
+            streams_text = " ".join(info["active_users"][:8])
             embed.add_field(
                 name=f"{stream_count} current Stream{'s' if stream_count != 1 else ''}:" + (f" (showing 8 of {stream_count})" if stream_count > 8 else ""),
                 value=streams_text,
@@ -506,32 +443,55 @@ class PlexCore(commands.Cog):
         else:
             embed.add_field(name="Current Streams:", value="💤 *No active streams currently*", inline=False)
 
+        # SABnzbd
         sabnzbd_cog = self.bot.get_cog("SABnzbd")
-        if info.get("downloads", {}).get("downloads"):
-            downloads = info["downloads"]["downloads"][:4]
-            download_count = len(info["downloads"]["downloads"])
-            downloads_text = "\n".join(
-                sabnzbd_cog.format_download_info(download, i)
-                for i, download in enumerate(downloads)
-            )
-            embed.add_field(
-                name=f"{download_count} current Download{'s' if download_count != 1 else ''}:",
-                value=downloads_text,
-                inline=False,
-            )
-            embed.add_field(name="Downloads 📥", value=f"```{self._calculate_total_size(downloads)}```", inline=True)
-            embed.add_field(name="Free Space 💾", value=f"```{info['downloads']['diskspace1']}```", inline=True)
-            embed.add_field(name="Total Space 🗄️", value=f"```{info['downloads']['diskspacetotal1']}```", inline=True)
-        else:
-            embed.add_field(name="Current Downloads:", value="💤 *No active downloads currently*", inline=False)
+        if sabnzbd_cog:
+            if info.get("downloads", {}).get("downloads"):
+                downloads = info["downloads"]["downloads"][:4]
+                download_count = len(info["downloads"]["downloads"])
+                downloads_text = "\n".join(
+                    self._format_sab_download(download, i)
+                    for i, download in enumerate(downloads)
+                )
+                embed.add_field(
+                    name=f"Sab: {download_count} current Download{'s' if download_count != 1 else ''}:",
+                    value=downloads_text,
+                    inline=False,
+                )
+                embed.add_field(name="Downloads 📥", value=f"```{self._calculate_total_size(downloads)}```", inline=True)
+                embed.add_field(name="Free Space 💾", value=f"```{info['downloads']['diskspace1']}```", inline=True)
+                embed.add_field(name="Total Space 🗄️", value=f"```{info['downloads']['diskspacetotal1']}```", inline=True)
+            else:
+                embed.add_field(name="Sab:", value="💤 *No active downloads currently*", inline=False)
 
-        # NEU: qBittorrent
+        # qBittorrent
         qb_field = info.get("qb_downloads")
         if qb_field:
-            embed.add_field(name=qb_field[0], value=qb_field[1], inline=False)
+            value = qb_field[1]
+            if value in ("Keine aktiven Downloads", "Nicht erreichbar"):
+                embed.add_field(name="qBit:", value="💤 *No active downloads currently*", inline=False)
+            else:
+                speed_part = qb_field[0].split("🌐")[-1].strip() if "🌐" in qb_field[0] else ""
+                name = f"qBit: {speed_part}" if speed_part else "qBit:"
+                embed.add_field(name=name, value=value, inline=False)
+
+    def _format_sab_download(self, download: Dict[str, Any], idx: int) -> str:
+        """Formatiert einen SABnzbd-Download im gleichen Style wie qBittorrent."""
+        name = download.get("filename", "Unknown")[:40]
+        progress = float(download.get("percentage", 0))
+        bar = f"{'▓' * int(progress / 10)}{'░' * (10 - int(progress / 10))}"
+        size = download.get("size", "?")
+        downloaded = download.get("downloaded", "?")
+        speed = download.get("speed", "?")
+        eta = download.get("timeleft", "?")
+
+        return (
+            f"**```⬇️ {name}\n"
+            f"└─ {bar} {progress:.1f}% · {downloaded} / {size}\n"
+            f" └─ ⚡ {speed} · ⏱️ {eta}```**"
+        )
 
     def _calculate_total_size(self, downloads: List[Dict[str, Any]]) -> str:
-        """Calculate total download size in human-readable format."""
         total_size_mb = 0
         for download in downloads:
             if download["size"] == "Unknown":
@@ -542,7 +502,6 @@ class PlexCore(commands.Cog):
         return f"{total_size_mb / 1024:.2f} GB" if total_size_mb >= 1024 else f"{total_size_mb:.2f} MB"
 
     async def _update_dashboard_message(self, channel: discord.TextChannel, embed: discord.Embed) -> None:
-        """Update or create the dashboard message in the specified channel."""
         if self.dashboard_message_id:
             try:
                 message = await channel.fetch_message(self.dashboard_message_id)
@@ -559,5 +518,4 @@ class PlexCore(commands.Cog):
             self.logger.info(f"New dashboard message created with ID: {self.dashboard_message_id}")
 
 async def setup(bot: commands.Bot) -> None:
-    """Set up the PlexCore cog for the bot."""
     await bot.add_cog(PlexCore(bot))
