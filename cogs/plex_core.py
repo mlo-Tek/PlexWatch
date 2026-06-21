@@ -68,7 +68,7 @@ class PlexCore(commands.Cog):
         try:
             with open(self.CONFIG_FILE, "r", encoding="utf-8") as f:
                 config = json.load(f)
-                return {**default_config, **config}  # Merge with defaults
+                return {**default_config, **config}
         except (FileNotFoundError, json.JSONDecodeError) as e:
             self.logger.error(f"Failed to load config: {e}. Using defaults.")
             return default_config
@@ -109,7 +109,7 @@ class PlexCore(commands.Cog):
             if self.plex_start_time is None:
                 self.plex_start_time = time.time()
             return plex
-        except Exception as e:  # Using generic Exception as plexapi doesn't expose a single base exception
+        except Exception as e:
             self.logger.error(f"Failed to connect to Plex server: {e}")
             self.plex_start_time = None
             return None
@@ -150,7 +150,6 @@ class PlexCore(commands.Cog):
         ):
             return self.library_cache
 
-        # Ensure Plex connection is established
         if not self.plex:
             self.plex = self.connect_to_plex()
         if not self.plex:
@@ -236,7 +235,7 @@ class PlexCore(commands.Cog):
                 for part in media.parts:
                     if hasattr(part, "streams"):
                         for stream in part.streams:
-                            if getattr(stream, "streamType", None) == 2:  # Audio stream
+                            if getattr(stream, "streamType", None) == 2:
                                 self.logger.debug(f"Language: {getattr(stream, 'language', 'Unknown')}")
                                 self.logger.debug(f"Language Code: {getattr(stream, 'languageCode', 'Unknown')}")
                                 self.logger.debug(f"Selected: {getattr(stream, 'selected', False)}")
@@ -277,17 +276,14 @@ class PlexCore(commands.Cog):
             total_time = self._format_time(str(timedelta(milliseconds=session.duration or 0)).split(".")[0], session.duration or 0)
 
             media = session.media[0] if hasattr(session, "media") and session.media else None
-            
-            # Handle quality display based on content type
+
             if getattr(session, "type", "") == "track":
-                # For music, show audio quality
                 audio_stream = next((stream for part in media.parts for stream in part.streams if stream.streamType == 2), None) if media else None
                 quality = f"{getattr(audio_stream, 'bitDepth', '')}bit" if audio_stream and getattr(audio_stream, 'bitDepth', None) else ""
                 if audio_stream and getattr(audio_stream, 'samplingRate', None):
                     quality += f" {int(audio_stream.samplingRate/1000)}kHz" if quality else f"{int(audio_stream.samplingRate/1000)}kHz"
                 quality = quality if quality else "Audio"
             else:
-                # For video content, show video quality
                 quality = f"{getattr(media, 'videoResolution', '1080')}p" if media else "1080p"
                 quality = quality[:-1] if quality.endswith("pp") else "4K" if quality in ["4kp", "4Kp"] else quality
 
@@ -323,12 +319,10 @@ class PlexCore(commands.Cog):
     def _get_formatted_title(self, session) -> str:
         """Format content title based on its type."""
         if hasattr(session, "type") and session.type == "track":
-            # Handle music tracks
             artist = getattr(session, "grandparentTitle", "Unknown Artist")
             track = getattr(session, "title", "Unknown Track")
             return f"{artist} - {track}"
         elif hasattr(session, "grandparentTitle"):
-            # Handle TV shows
             series_title = session.grandparentTitle.split(":")[0].split("-")[0].strip()
             episode_info = (
                 f"S{session.parentIndex:02d}E{session.index:02d}"
@@ -336,7 +330,6 @@ class PlexCore(commands.Cog):
                 else ""
             )
             return f"{series_title} - {episode_info}"
-        # Handle movies
         year = f" ({session.year})" if hasattr(session, "year") and session.year else ""
         return f"{session.title}{year}"
 
@@ -399,16 +392,22 @@ class PlexCore(commands.Cog):
 
     @tasks.loop(minutes=1)
     async def update_dashboard(self) -> None:
-        """Update Discord dashboard with Plex, SABnzbd, and Uptime data."""
+        """Update Discord dashboard with Plex, SABnzbd, qBittorrent and Uptime data."""
         channel = self.bot.get_channel(self.CHANNEL_ID)
         if not channel:
             return
 
         try:
             info = self.get_server_info()
+
             sabnzbd_cog = self.bot.get_cog("SABnzbd")
             if sabnzbd_cog:
                 info["downloads"] = await sabnzbd_cog.get_sabnzbd_info()
+
+            # NEU: qBittorrent
+            qb_cog = self.bot.get_cog("QBittorrentCog")
+            if qb_cog:
+                info["qb_downloads"] = await qb_cog.get_downloads_field()
 
             uptime_cog = self.bot.get_cog("Uptime")
             if uptime_cog:
@@ -457,7 +456,7 @@ class PlexCore(commands.Cog):
                     if minutes > 0 else "Just now"
                 )
             embed.add_field(name="Offline since:", value=f"```{offline_since_str}\n{time_diff_str}```", inline=False)
-            
+
             uptime_cog = self.bot.get_cog("Uptime")
             if uptime_cog and "uptime_24h" in info and info["uptime_24h"] != "No data":
                 embed.add_field(name="Uptime (24h)", value=f"```{info['uptime_24h']}```", inline=True)
@@ -474,8 +473,8 @@ class PlexCore(commands.Cog):
     async def _add_embed_fields(self, embed: discord.Embed, info: Dict[str, Any]) -> None:
         """Add fields to the dashboard embed when server is online."""
         embed.add_field(name="Server Uptime 🖥️", value=f"```{info['uptime']}```", inline=True)
-        embed.add_field(name="", value="", inline=True)  # Spacer
-        embed.add_field(name="", value="", inline=True)  # Spacer
+        embed.add_field(name="", value="", inline=True)
+        embed.add_field(name="", value="", inline=True)
 
         stats = info["library_stats"]
         plex_config = self.config["plex_sections"]
@@ -497,7 +496,6 @@ class PlexCore(commands.Cog):
 
         if info["active_users"]:
             stream_count = len(info["active_users"])
-
             streams_limited = info["active_users"][:8]
             streams_text = " ".join(streams_limited)
             embed.add_field(
@@ -526,6 +524,11 @@ class PlexCore(commands.Cog):
             embed.add_field(name="Total Space 🗄️", value=f"```{info['downloads']['diskspacetotal1']}```", inline=True)
         else:
             embed.add_field(name="Current Downloads:", value="💤 *No active downloads currently*", inline=False)
+
+        # NEU: qBittorrent
+        qb_field = info.get("qb_downloads")
+        if qb_field:
+            embed.add_field(name=qb_field[0], value=qb_field[1], inline=False)
 
     def _calculate_total_size(self, downloads: List[Dict[str, Any]]) -> str:
         """Calculate total download size in human-readable format."""
